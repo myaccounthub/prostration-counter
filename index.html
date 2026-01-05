@@ -28,6 +28,12 @@
 
   .timer {
     font-size: 1.2rem;
+    margin-bottom: 10px;
+  }
+
+  .debug {
+    font-size: 0.75rem;
+    opacity: 0.7;
     margin-bottom: 20px;
   }
 
@@ -59,6 +65,7 @@
 
 <div class="counter" id="count">0</div>
 <div class="timer" id="time">00:00</div>
+<div class="debug" id="debug">Waiting…</div>
 
 <button class="start" onclick="start()">Start</button>
 <button class="stop" onclick="stop()">Stop</button>
@@ -66,32 +73,31 @@
 
 <div class="instructions">
   Place phone in chest pocket or flat on prayer mat.<br>
-  Keep orientation consistent throughout.
+  Keep orientation consistent.
 </div>
 
 <script>
 /* =======================
    Configuration
 ======================= */
-const BEND_THRESHOLD = -25;        // degrees
-const PROSTRATION_THRESHOLD = -65; // degrees
-const STABLE_TIME_MS = 700;
+const BEND_THRESHOLD = -10;
+const PROSTRATION_THRESHOLD = -35;
+const STABLE_TIME_MS = 400;
 const STABILITY_ACCEL = 0.15;
 
 /* =======================
-   State Variables
+   State
 ======================= */
 let state = "IDLE";
 let uprightPitch = 0;
 let prostrationStart = null;
-
 let count = 0;
 let startTime = null;
 let timerInterval = null;
 let running = false;
 
 /* =======================
-   Utility
+   Utils
 ======================= */
 function formatTime(ms) {
   const total = Math.floor(ms / 1000);
@@ -101,42 +107,44 @@ function formatTime(ms) {
 }
 
 /* =======================
-   Motion Handling
+   Orientation
 ======================= */
 function handleOrientation(e) {
-  if (!running) return;
+  if (!running || e.beta == null) return;
 
   const pitch = e.beta - uprightPitch;
 
-  switch (state) {
-    case "UPRIGHT":
-      if (pitch < BEND_THRESHOLD) state = "BENDING";
-      break;
+  document.getElementById("debug").textContent =
+    `State: ${state} | Pitch: ${pitch.toFixed(1)}`;
 
-    case "BENDING":
-      if (pitch < PROSTRATION_THRESHOLD) {
-        state = "PROSTRATION";
-        prostrationStart = null;
-      }
-      break;
+  if (state === "UPRIGHT" && pitch < BEND_THRESHOLD) {
+    state = "BENDING";
+  }
 
-    case "RETURNING":
-      if (Math.abs(pitch) < 10) {
-        count++;
-        document.getElementById("count").textContent = count;
-        state = "UPRIGHT";
-      }
-      break;
+  if (state === "BENDING" && pitch < PROSTRATION_THRESHOLD) {
+    state = "PROSTRATION";
+    prostrationStart = null;
+  }
+
+  if (state === "RETURNING" && Math.abs(pitch) < 10) {
+    count++;
+    document.getElementById("count").textContent = count;
+    state = "UPRIGHT";
   }
 }
 
+/* =======================
+   Motion (stability)
+======================= */
 function handleMotion(e) {
   if (!running || state !== "PROSTRATION") return;
 
   const a = e.accelerationIncludingGravity;
-  const magnitude = Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z);
+  if (!a) return;
 
-  if (magnitude < STABILITY_ACCEL) {
+  const mag = Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z);
+
+  if (mag < STABILITY_ACCEL) {
     if (!prostrationStart) {
       prostrationStart = Date.now();
     } else if (Date.now() - prostrationStart > STABLE_TIME_MS) {
@@ -148,20 +156,31 @@ function handleMotion(e) {
 }
 
 /* =======================
-   Controls
+   Controls (FIXED)
 ======================= */
 async function start() {
   if (running) return;
 
-  if (typeof DeviceOrientationEvent.requestPermission === "function") {
-    const perm = await DeviceOrientationEvent.requestPermission();
-    if (perm !== "granted") return alert("Motion permission required.");
+  // 🔴 REQUIRED on modern iOS
+  if (typeof DeviceMotionEvent?.requestPermission === "function") {
+    try {
+      const motionPerm = await DeviceMotionEvent.requestPermission();
+      const orientPerm = await DeviceOrientationEvent.requestPermission();
+
+      if (motionPerm !== "granted" || orientPerm !== "granted") {
+        alert("Motion permission is required.");
+        return;
+      }
+    } catch (err) {
+      alert("Motion permission failed.");
+      return;
+    }
   }
 
   running = true;
   count = 0;
   state = "CALIBRATING";
-  document.getElementById("count").textContent = 0;
+  document.getElementById("count").textContent = "0";
 
   startTime = Date.now();
   timerInterval = setInterval(() => {
@@ -170,7 +189,7 @@ async function start() {
   }, 1000);
 
   window.addEventListener("deviceorientation", e => {
-    if (state === "CALIBRATING") {
+    if (state === "CALIBRATING" && e.beta != null) {
       uprightPitch = e.beta;
       state = "UPRIGHT";
     }
@@ -189,8 +208,9 @@ function resetAll() {
   stop();
   count = 0;
   state = "IDLE";
-  document.getElementById("count").textContent = 0;
+  document.getElementById("count").textContent = "0";
   document.getElementById("time").textContent = "00:00";
+  document.getElementById("debug").textContent = "Waiting…";
 }
 </script>
 
