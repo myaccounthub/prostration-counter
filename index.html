@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prostration Counter</title>
+
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont;
+    background: #0f172a;
+    color: #e5e7eb;
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 10px;
+  }
+
+  .counter {
+    font-size: 5rem;
+    font-weight: bold;
+    margin: 20px 0;
+  }
+
+  .timer {
+    font-size: 1.2rem;
+    margin-bottom: 20px;
+  }
+
+  button {
+    font-size: 1rem;
+    padding: 12px 20px;
+    margin: 8px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+  }
+
+  .start { background: #22c55e; color: #022c22; }
+  .stop  { background: #ef4444; color: #450a0a; }
+  .reset { background: #38bdf8; color: #082f49; }
+
+  .instructions {
+    font-size: 0.9rem;
+    opacity: 0.85;
+    margin-top: 25px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>📿 Prostration Counter</h1>
+
+<div class="counter" id="count">0</div>
+<div class="timer" id="time">00:00</div>
+
+<button class="start" onclick="start()">Start</button>
+<button class="stop" onclick="stop()">Stop</button>
+<button class="reset" onclick="resetAll()">Reset</button>
+
+<div class="instructions">
+  Place phone in chest pocket or flat on prayer mat.<br>
+  Keep orientation consistent throughout.
+</div>
+
+<script>
+/* =======================
+   Configuration
+======================= */
+const BEND_THRESHOLD = -25;        // degrees
+const PROSTRATION_THRESHOLD = -65; // degrees
+const STABLE_TIME_MS = 700;
+const STABILITY_ACCEL = 0.15;
+
+/* =======================
+   State Variables
+======================= */
+let state = "IDLE";
+let uprightPitch = 0;
+let prostrationStart = null;
+
+let count = 0;
+let startTime = null;
+let timerInterval = null;
+let running = false;
+
+/* =======================
+   Utility
+======================= */
+function formatTime(ms) {
+  const total = Math.floor(ms / 1000);
+  const m = String(Math.floor(total / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+/* =======================
+   Motion Handling
+======================= */
+function handleOrientation(e) {
+  if (!running) return;
+
+  const pitch = e.beta - uprightPitch;
+
+  switch (state) {
+    case "UPRIGHT":
+      if (pitch < BEND_THRESHOLD) state = "BENDING";
+      break;
+
+    case "BENDING":
+      if (pitch < PROSTRATION_THRESHOLD) {
+        state = "PROSTRATION";
+        prostrationStart = null;
+      }
+      break;
+
+    case "RETURNING":
+      if (Math.abs(pitch) < 10) {
+        count++;
+        document.getElementById("count").textContent = count;
+        state = "UPRIGHT";
+      }
+      break;
+  }
+}
+
+function handleMotion(e) {
+  if (!running || state !== "PROSTRATION") return;
+
+  const a = e.accelerationIncludingGravity;
+  const magnitude = Math.abs(a.x) + Math.abs(a.y) + Math.abs(a.z);
+
+  if (magnitude < STABILITY_ACCEL) {
+    if (!prostrationStart) {
+      prostrationStart = Date.now();
+    } else if (Date.now() - prostrationStart > STABLE_TIME_MS) {
+      state = "RETURNING";
+    }
+  } else {
+    prostrationStart = null;
+  }
+}
+
+/* =======================
+   Controls
+======================= */
+async function start() {
+  if (running) return;
+
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    const perm = await DeviceOrientationEvent.requestPermission();
+    if (perm !== "granted") return alert("Motion permission required.");
+  }
+
+  running = true;
+  count = 0;
+  state = "CALIBRATING";
+  document.getElementById("count").textContent = 0;
+
+  startTime = Date.now();
+  timerInterval = setInterval(() => {
+    document.getElementById("time").textContent =
+      formatTime(Date.now() - startTime);
+  }, 1000);
+
+  window.addEventListener("deviceorientation", e => {
+    if (state === "CALIBRATING") {
+      uprightPitch = e.beta;
+      state = "UPRIGHT";
+    }
+    handleOrientation(e);
+  });
+
+  window.addEventListener("devicemotion", handleMotion);
+}
+
+function stop() {
+  running = false;
+  clearInterval(timerInterval);
+}
+
+function resetAll() {
+  stop();
+  count = 0;
+  state = "IDLE";
+  document.getElementById("count").textContent = 0;
+  document.getElementById("time").textContent = "00:00";
+}
+</script>
+
+</body>
+</html>
